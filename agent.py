@@ -14,7 +14,7 @@ from simple_term_menu import TerminalMenu
 import tempfile
 
 # Command to launch the workspace session (e.g., zellij, tmux, etc.)
-WORKSPACE_CMD = ["vim", "."]
+WORKSPACE_CMD = []
 
 
 def run_command(cmd, cwd=None, check=True, input=None):
