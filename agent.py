@@ -12,9 +12,12 @@ import shlex
 from pathlib import Path
 from simple_term_menu import TerminalMenu
 import tempfile
+import shutil
 
 # Command to launch the workspace session (e.g., zellij, tmux, etc.)
 WORKSPACE_CMD = []
+# Untracked paths to copy into newly created worktrees (relative to CWD).
+COPY_UNTRACKED_PATHS = ["DerivedData"]
 
 
 def run_command(cmd, cwd=None, check=True, input=None):
@@ -27,6 +30,47 @@ def run_command(cmd, cwd=None, check=True, input=None):
         print(f"Error: {result.stderr}")
         sys.exit(1)
     return result
+
+
+def copy_untracked_paths(source_dir, target_dir):
+    for rel_path in COPY_UNTRACKED_PATHS:
+        src_path = os.path.join(source_dir, rel_path)
+        dst_path = os.path.join(target_dir, rel_path)
+        if not os.path.exists(src_path):
+            continue
+        if os.path.isdir(src_path):
+            copy_dir_best_effort(src_path, dst_path)
+        else:
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+            try:
+                shutil.copy2(src_path, dst_path)
+            except FileNotFoundError:
+                # File disappeared between exists check and copy; skip.
+                pass
+
+
+def copy_dir_best_effort(src_dir, dst_dir):
+    errors = []
+    for root, dirs, files in os.walk(src_dir):
+        rel_root = os.path.relpath(root, src_dir)
+        target_root = dst_dir if rel_root == "." else os.path.join(dst_dir, rel_root)
+        os.makedirs(target_root, exist_ok=True)
+        for dir_name in dirs:
+            os.makedirs(os.path.join(target_root, dir_name), exist_ok=True)
+        for file_name in files:
+            src_file = os.path.join(root, file_name)
+            dst_file = os.path.join(target_root, file_name)
+            try:
+                shutil.copy2(src_file, dst_file)
+            except FileNotFoundError:
+                # Files like lockfiles may disappear; skip them.
+                continue
+            except OSError as exc:
+                errors.append((src_file, str(exc)))
+    if errors:
+        print("Warning: Some files could not be copied:")
+        for src_file, error in errors:
+            print(f"  {src_file}: {error}")
 
 
 def get_git_root():
@@ -252,6 +296,7 @@ def create_worktree(branch_name):
     # Check if worktree already exists
     worktree_path = get_worktree_path(branch_name)
 
+    created = False
     if worktree_path:
         # Worktree already exists, prompt the user
         print(f"Worktree '{branch_name}' already exists.")
@@ -279,6 +324,7 @@ def create_worktree(branch_name):
         print(f"Creating new worktree at: {worktree_dir}")
         run_command(f"git worktree add '{worktree_dir}' '{branch_name}'")
         worktree_path = worktree_dir
+        created = True
 
     # Navigate to the worktree directory (and subdirectory if needed)
     target_dir = worktree_path
@@ -286,6 +332,9 @@ def create_worktree(branch_name):
         target_dir = os.path.join(worktree_path, relative_path)
         # Create subdirectory if it doesn't exist
         os.makedirs(target_dir, exist_ok=True)
+
+    if created:
+        copy_untracked_paths(current_dir, target_dir)
 
     # Change to the target directory and exec into shell running workspace command
     os.chdir(target_dir)
