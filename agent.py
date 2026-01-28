@@ -465,6 +465,26 @@ def has_remote_branch(branch_name):
     return bool(result.stdout.strip())
 
 
+def get_remote_branch_tip(branch_name):
+    """Get the tip commit hash for origin/branch_name, or None if it doesn't exist."""
+    result = run_command(f"git ls-remote --heads origin {branch_name}", check=False)
+    output = result.stdout.strip()
+    if not output:
+        return None
+    return output.split()[0]
+
+
+def is_branch_tip_pushed(branch_name):
+    """Check if the local branch tip matches the remote tip."""
+    local_tip = run_command(f"git rev-parse {branch_name}", check=False).stdout.strip()
+    if not local_tip:
+        return False
+    remote_tip = get_remote_branch_tip(branch_name)
+    if not remote_tip:
+        return False
+    return local_tip == remote_tip
+
+
 def destroy_worktree_interactive(force=False):
     """Interactive mode for destroying worktrees."""
     # Get all worktrees
@@ -923,6 +943,13 @@ def destroy_worktree(branch_name, force=False):
         print(f"Error: No worktree found for branch '{branch_name}'")
         sys.exit(1)
 
+    if has_unstaged_changes(cwd=worktree_path):
+        print(
+            f"Error: Worktree for '{branch_name}' has uncommitted changes. "
+            "Please commit or discard them before destroying."
+        )
+        sys.exit(1)
+
     # Get the parent branch from the description
     parent_branch = get_branch_parent(branch_name)
 
@@ -939,13 +966,21 @@ def destroy_worktree(branch_name, force=False):
         print(f"Using '{parent_branch}' as the parent branch")
 
     if not force:
-        print(f"Checking if '{branch_name}' has been merged into '{parent_branch}'...")
+        print(
+            f"Checking if '{branch_name}' has been merged into '{parent_branch}' "
+            "or pushed to origin..."
+        )
 
         # Check if the branch has been merged
-        if not is_branch_merged(branch_name, parent_branch):
+        if not is_branch_merged(branch_name, parent_branch) and not is_branch_tip_pushed(
+            branch_name
+        ):
             print(f"Error: Branch '{branch_name}' contains unmerged changes.")
             print(
                 f"Please merge the changes into '{parent_branch}' before destroying the worktree."
+            )
+            print(
+                "Alternatively, push the latest commit to origin so it is preserved."
             )
             print(f"Or use --force to delete anyway.")
             sys.exit(1)
@@ -962,11 +997,6 @@ def destroy_worktree(branch_name, force=False):
         run_command(f"git branch -D {branch_name}")
     else:
         run_command(f"git branch -d {branch_name}")
-
-    # Delete the remote branch if it exists
-    if has_remote_branch(branch_name):
-        print(f"Deleting remote branch: origin/{branch_name}")
-        run_command(f"git push origin --delete {branch_name}")
 
     print(f"Successfully destroyed worktree and branch '{branch_name}'")
 
