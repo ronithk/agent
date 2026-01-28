@@ -125,7 +125,7 @@ def branch_exists(branch_name):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: claudebg <command> [args]")
+        print("Usage: agent <command> [args]")
         print("Commands:")
         print("  create <branch-name>   Create and switch to a git worktree")
         print("  attach [branch-name]   Attach to an existing worktree")
@@ -152,13 +152,13 @@ def main():
 
     if command == "create":
         if len(sys.argv) != 3:
-            print("Usage: claudebg create <branch-name>")
+            print("Usage: agent create <branch-name>")
             sys.exit(1)
         branch_name = sys.argv[2]
         create_worktree(branch_name)
     elif command == "attach":
         if len(sys.argv) > 3:
-            print("Usage: claudebg attach [branch-name]")
+            print("Usage: agent attach [branch-name]")
             sys.exit(1)
 
         if len(sys.argv) == 3:
@@ -183,7 +183,7 @@ def main():
                     branch_name = args[i]
                 else:
                     print("Error: Too many arguments")
-                    print("Usage: claudebg destroy [branch-name] [--force]")
+                    print("Usage: agent destroy [branch-name] [--force]")
                     sys.exit(1)
             i += 1
 
@@ -195,7 +195,7 @@ def main():
             destroy_worktree(branch_name, force=force)
     elif command == "intervene":
         if len(sys.argv) > 3:
-            print("Usage: claudebg intervene [branch-name]")
+            print("Usage: agent intervene [branch-name]")
             sys.exit(1)
 
         if len(sys.argv) == 3:
@@ -207,12 +207,12 @@ def main():
             intervene_worktree_interactive()
     elif command == "spinout":
         if len(sys.argv) != 2:
-            print("Usage: claudebg spinout")
+            print("Usage: agent spinout")
             sys.exit(1)
         spinout_worktree()
     else:
         print(f"Unknown command: {command}")
-        print("Usage: claudebg <command> [args]")
+        print("Usage: agent <command> [args]")
         print("Commands:")
         print("  create <branch-name>   Create and switch to a git worktree")
         print("  attach [branch-name]   Attach to an existing worktree")
