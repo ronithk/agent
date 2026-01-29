@@ -48,27 +48,19 @@ def copy_untracked_paths(source_dir, target_dir):
 
 
 def copy_dir_best_effort(src_dir, dst_dir):
-    errors = []
-    for root, dirs, files in os.walk(src_dir):
-        rel_root = os.path.relpath(root, src_dir)
-        target_root = dst_dir if rel_root == "." else os.path.join(dst_dir, rel_root)
-        os.makedirs(target_root, exist_ok=True)
-        for dir_name in dirs:
-            os.makedirs(os.path.join(target_root, dir_name), exist_ok=True)
-        for file_name in files:
-            src_file = os.path.join(root, file_name)
-            dst_file = os.path.join(target_root, file_name)
-            try:
-                shutil.copy2(src_file, dst_file)
-            except FileNotFoundError:
-                # Files like lockfiles may disappear; skip them.
-                continue
-            except OSError as exc:
-                errors.append((src_file, str(exc)))
-    if errors:
-        print("Warning: Some files could not be copied:")
-        for src_file, error in errors:
-            print(f"  {src_file}: {error}")
+    """Try a fast APFS clone via ditto --clone; skip on failure."""
+    if sys.platform != "darwin" or not shutil.which("ditto"):
+        print("DerivedData copy skipped: ditto not available.")
+        return
+
+    os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
+    print("Copying DerivedData with ditto --clone...")
+    result = run_command(
+        f"ditto --clone {shlex.quote(src_dir)} {shlex.quote(dst_dir)}",
+        check=False,
+    )
+    if result.returncode != 0:
+        print("DerivedData copy skipped: ditto --clone failed.")
 
 
 def get_git_root():
