@@ -24,7 +24,7 @@ COPY_UNTRACKED_PATHS = ["DerivedData"]
 @contextmanager
 def status(text):
     """Display a spinner with status text during an operation."""
-    with yaspin(text=text, color="blue") as sp:
+    with yaspin(text=text, color="blue", ellipsis="") as sp:
         yield sp
 
 
@@ -38,6 +38,26 @@ def run_command(cmd, cwd=None, check=True, input=None):
         print(f"Error: {result.stderr}")
         sys.exit(1)
     return result
+
+
+def run_command_stream(cmd, cwd=None, on_output=None):
+    """Run a shell command and stream its output line-by-line."""
+    process = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=cwd,
+    )
+    output = []
+    if process.stdout:
+        for line in process.stdout:
+            output.append(line)
+            if on_output:
+                on_output(line)
+    returncode = process.wait()
+    return returncode, "".join(output)
 
 
 def copy_untracked_paths(source_dir, target_dir):
@@ -64,14 +84,48 @@ def copy_dir_best_effort(src_dir, dst_dir):
         return
 
     os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
-    with status("Copying DerivedData") as sp:
-        result = run_command(
-            f"ditto --clone {shlex.quote(src_dir)} {shlex.quote(dst_dir)}",
-            check=False,
+    base_text = "Copying DerivedData"
+
+    def update_spinner(line):
+        entry = line.strip()
+        if not entry:
+            return
+        if entry.lower().startswith("copying "):
+            entry = entry[len("copying ") :].strip()
+            if entry.endswith("..."):
+                entry = entry[:-3].rstrip()
+            for prefix in (
+                "file ",
+                "directory ",
+                "dir ",
+                "folder ",
+                "symlink ",
+                "link ",
+                "special file ",
+                "fifo ",
+                "socket ",
+            ):
+                if entry.lower().startswith(prefix):
+                    entry = entry[len(prefix) :]
+                    break
+        idx = entry.find(src_dir)
+        if idx != -1:
+            entry = entry[idx + len(src_dir) :].lstrip(os.sep)
+        entry = os.path.basename(entry.lstrip("./"))
+        if entry:
+            sp.text = f"{base_text}: {entry}"
+
+    with status(base_text) as sp:
+        returncode, output = run_command_stream(
+            f"ditto --clone -V {shlex.quote(src_dir)} {shlex.quote(dst_dir)}",
+            on_output=update_spinner,
         )
-        if result.returncode != 0:
+        if returncode != 0:
             sp.fail("DerivedData copy failed")
+            if output.strip():
+                print(output.strip())
         else:
+            sp.text = base_text
             sp.ok("Done")
 
 
