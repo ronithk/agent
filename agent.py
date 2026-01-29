@@ -2,6 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #   "simple-term-menu",
+#   "yaspin",
 # ]
 # ///
 
@@ -9,13 +10,22 @@ import sys
 import os
 import subprocess
 import shlex
+from contextlib import contextmanager
 from simple_term_menu import TerminalMenu
 import shutil
+from yaspin import yaspin
 
 # Command to launch the workspace session (e.g., zellij, tmux, etc.)
 WORKSPACE_CMD = []
 # Untracked paths to copy into newly created worktrees (relative to CWD).
 COPY_UNTRACKED_PATHS = ["DerivedData"]
+
+
+@contextmanager
+def status(text):
+    """Display a spinner with status text during an operation."""
+    with yaspin(text=text, color="blue") as sp:
+        yield sp
 
 
 def run_command(cmd, cwd=None, check=True, input=None):
@@ -54,13 +64,15 @@ def copy_dir_best_effort(src_dir, dst_dir):
         return
 
     os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
-    print("Copying DerivedData with ditto --clone...")
-    result = run_command(
-        f"ditto --clone {shlex.quote(src_dir)} {shlex.quote(dst_dir)}",
-        check=False,
-    )
-    if result.returncode != 0:
-        print("DerivedData copy skipped: ditto --clone failed.")
+    with status("Copying DerivedData") as sp:
+        result = run_command(
+            f"ditto --clone {shlex.quote(src_dir)} {shlex.quote(dst_dir)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            sp.fail("DerivedData copy failed")
+        else:
+            sp.ok("Done")
 
 
 def get_git_root():
@@ -238,11 +250,12 @@ def create_worktree(branch_name):
     else:
         # Create branch if it doesn't exist
         if not branch_exists(branch_name):
-            print(f"Creating new branch: {branch_name} from {parent_branch}")
-            run_command(f"git checkout -b {branch_name}")
-            # Store the parent branch in the description
-            set_branch_parent(branch_name, parent_branch)
-            run_command("git checkout -")  # Switch back to original branch
+            with status(f"Creating branch '{branch_name}' from '{parent_branch}'") as sp:
+                run_command(f"git checkout -b {branch_name}")
+                # Store the parent branch in the description
+                set_branch_parent(branch_name, parent_branch)
+                run_command("git checkout -")  # Switch back to original branch
+                sp.ok("Done")
 
         # Create worktree inside the worktrees container directory
         parent_dir = os.path.dirname(git_root)
@@ -251,8 +264,9 @@ def create_worktree(branch_name):
         os.makedirs(worktrees_container, exist_ok=True)
         worktree_dir = os.path.join(worktrees_container, branch_name)
 
-        print(f"Creating new worktree at: {worktree_dir}")
-        run_command(f"git worktree add '{worktree_dir}' '{branch_name}'")
+        with status(f"Creating worktree at '{worktree_dir}'") as sp:
+            run_command(f"git worktree add '{worktree_dir}' '{branch_name}'")
+            sp.ok("Done")
         worktree_path = worktree_dir
         created = True
 
@@ -268,7 +282,8 @@ def create_worktree(branch_name):
 
     # Change to the target directory and exec into shell running workspace command
     os.chdir(target_dir)
-    print(f"Launching workspace in: {target_dir}")
+    with status(f"Launching workspace in '{target_dir}'") as sp:
+        sp.ok("Done")
     shell = os.environ.get("SHELL", "/bin/bash")
     workspace_cmd_str = shlex.join(WORKSPACE_CMD)
     os.execvp(shell, [shell, "-c", f"{workspace_cmd_str}; exec {shell}"])
@@ -301,7 +316,8 @@ def attach_worktree(branch_name):
 
     # Change to the target directory and exec into shell running workspace command
     os.chdir(target_dir)
-    print(f"Attaching to worktree in: {target_dir}")
+    with status(f"Attaching to worktree in '{target_dir}'") as sp:
+        sp.ok("Done")
     shell = os.environ.get("SHELL", "/bin/bash")
     workspace_cmd_str = shlex.join(WORKSPACE_CMD)
     os.execvp(shell, [shell, "-c", f"{workspace_cmd_str}; exec {shell}"])
@@ -490,37 +506,37 @@ def destroy_worktree(branch_name, force=False):
         print(f"Using '{parent_branch}' as the parent branch")
 
     if not force:
-        print(
-            f"Checking if '{branch_name}' has been merged into '{parent_branch}' "
-            "or pushed to origin..."
-        )
-
-        # Check if the branch has been merged
-        if not is_branch_merged(branch_name, parent_branch) and not is_branch_tip_pushed(
-            branch_name
-        ):
-            print(f"Error: Branch '{branch_name}' contains unmerged changes.")
-            print(
-                f"Please merge the changes into '{parent_branch}' before destroying the worktree."
-            )
-            print(
-                "Alternatively, push the latest commit to origin so it is preserved."
-            )
-            print(f"Or use --force to delete anyway.")
-            sys.exit(1)
+        with status(f"Checking if '{branch_name}' has been merged or pushed") as sp:
+            merged = is_branch_merged(branch_name, parent_branch)
+            pushed = is_branch_tip_pushed(branch_name)
+            if not merged and not pushed:
+                sp.fail("Unmerged changes")
+                print(f"Error: Branch '{branch_name}' contains unmerged changes.")
+                print(
+                    f"Please merge the changes into '{parent_branch}' before destroying the worktree."
+                )
+                print(
+                    "Alternatively, push the latest commit to origin so it is preserved."
+                )
+                print(f"Or use --force to delete anyway.")
+                sys.exit(1)
+            sp.ok("Safe to delete")
     else:
-        print(f"Force flag enabled, skipping merge check...")
+        with status("Skipping merge check (--force)") as sp:
+            sp.ok("Done")
 
     # Remove the worktree
-    print(f"Removing worktree at: {worktree_path}")
-    run_command(f"git worktree remove --force '{worktree_path}'")
+    with status(f"Removing worktree at '{worktree_path}'") as sp:
+        run_command(f"git worktree remove --force '{worktree_path}'")
+        sp.ok("Done")
 
     # Delete the local branch
-    print(f"Deleting local branch: {branch_name}")
-    if force:
-        run_command(f"git branch -D {branch_name}")
-    else:
-        run_command(f"git branch -d {branch_name}")
+    with status(f"Deleting local branch '{branch_name}'") as sp:
+        if force:
+            run_command(f"git branch -D {branch_name}")
+        else:
+            run_command(f"git branch -d {branch_name}")
+        sp.ok("Done")
 
     print(f"Successfully destroyed worktree and branch '{branch_name}'")
 
