@@ -752,7 +752,7 @@ def destroy_worktree(branch_name, force=False):
         print(f"Error: No worktree found for branch '{branch_name}'")
         sys.exit(1)
 
-    if has_unstaged_changes(cwd=worktree_path):
+    if not force and has_unstaged_changes(cwd=worktree_path):
         print(
             f"Error: Worktree for '{branch_name}' has uncommitted changes. "
             "Please commit or discard them before destroying."
